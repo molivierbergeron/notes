@@ -92,6 +92,20 @@ h2 .count{font-family:var(--font-body);font-weight:400;font-size:13px;color:var(
 .prob i b{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
 .grp-label{font-size:11.5px;color:var(--muted)}
 .row-body{padding:0 14px 14px 40px;display:grid;gap:10px}
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+.pair .mine{display:grid;gap:6px}
+.reco{background:var(--accent-soft);border:1px solid var(--line);border-radius:6px;padding:8px 10px 10px;display:grid;gap:6px}
+.reco ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.reco li{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:start;font-size:14.5px;line-height:1.45}
+.reco .txt{padding-left:12px;position:relative}
+.reco .txt::before{content:"";position:absolute;left:0;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.reco .add1{border:1px solid var(--line);background:var(--card);border-radius:4px;width:24px;height:24px;line-height:1;padding:0;font-size:15px;color:var(--muted)}
+.reco .add1:hover{color:var(--accent);border-color:var(--accent)}
+.reco .add1[disabled]{opacity:.45;cursor:default}
+.reco-actions{display:flex;flex-wrap:wrap;gap:6px}
+.reco-actions .btn{padding:4px 9px;font-size:12.5px}
+.has-reco{font-size:11.5px;color:var(--accent);white-space:nowrap}
+textarea.imp{width:100%;min-height:140px;border:1px solid var(--line);border-radius:6px;padding:9px 10px;background:var(--card);font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 0}
 .facts div{background:var(--paper);border-radius:6px;padding:8px 10px}
 .facts dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px}
@@ -142,6 +156,7 @@ textarea.notes:focus,.edit-grid textarea:focus,.edit-grid input:focus{border-col
   .row-head{grid-template-columns:14px 1fr}
   .row-meta{grid-column:2;justify-content:flex-start}
   .row-body{padding-left:14px}
+  .pair{grid-template-columns:1fr}
   .facts,.pitch-cols{grid-template-columns:1fr}
   .edit-grid .two{grid-template-columns:1fr}
   h1{font-size:20px}
@@ -319,7 +334,7 @@ async function sync(){
 function matches(it, n){
   if(ui.text){
     var t = ui.text.toLowerCase();
-    var hay = [it.q, it.notes, it.angle, it.tested, it.title, it.hint, it.fr, it.en].join(" ").toLowerCase();
+    var hay = [it.q, it.notes, it.reco, it.angle, it.tested, it.title, it.hint, it.fr, it.en].join(" ").toLowerCase();
     if(hay.indexOf(t) < 0) return false;
   }
   if(n === "questions"){
@@ -361,6 +376,7 @@ function toolbarHtml(){
   }
   h += '<div class="tool-actions">';
   if(isQ) h += '<button type="button" class="btn primary" data-act="practice">Mode pratique</button>';
+  if(isQ) h += '<button type="button" class="btn" data-act="reco-import-open">Importer des recommandations</button>';
   if(hasStatus) h += '<button type="button" class="btn" data-act="expand">Tout déplier</button><button type="button" class="btn" data-act="collapse">Tout replier</button>';
   h += '<button type="button" class="btn" data-act="copy">Copier en Markdown</button><button type="button" class="btn" data-act="download">Télécharger .md</button>';
   h += '<button type="button" class="btn ghost" data-act="token">Réglages GitHub</button><button type="button" class="btn ghost" data-act="lock">Verrouiller</button>';
@@ -372,6 +388,46 @@ function probHtml(p){
   var v = Math.max(0, Math.min(100, Number(p) || 0));
   return '<span class="prob" title="Probabilité estimée"><i><b style="width:' + v + '%"></b></i>' + v + ' %</span>';
 }
+function recoLines(it){ return String(it.reco || "").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); }
+function noteHas(it, line){ return String(it.notes || "").split("\n").some(function(s){ return s.trim() === line; }); }
+function recoHtml(it){
+  var lines = recoLines(it);
+  var h = '<aside class="reco" aria-label="Messages recommandés"><span class="field-label">Recommandé par Claude</span>';
+  if(!lines.length) return h + '<div class="grp-label">Pas encore de recommandation pour cette question.</div></aside>';
+  h += '<ul>' + lines.map(function(l, i){
+    var has = noteHas(it, l);
+    return '<li><span class="txt">' + esc(l) + '</span><button type="button" class="add1" data-act="reco-add" data-id="' + it.id + '" data-i="' + i + '"' + (has ? ' disabled title="Déjà dans tes messages"' : ' title="Ajouter à mes messages"') + ' aria-label="Ajouter ce message">' + (has ? '✓' : '+') + '</button></li>';
+  }).join("") + '</ul>';
+  return h + '<div class="reco-actions"><button type="button" class="btn" data-act="reco-all" data-id="' + it.id + '">Tout ajouter à mes messages</button><button type="button" class="btn ghost" data-act="reco-copy" data-id="' + it.id + '">Copier</button></div></aside>';
+}
+function addToNotes(it, lines){
+  var cur = String(it.notes || "").replace(/\s+$/, "");
+  var add = lines.filter(function(l){ return l && !noteHas(it, l); });
+  if(!add.length) return 0;
+  it.notes = (cur ? cur + "\n" : "") + add.join("\n");
+  return add.length;
+}
+function openRecoImport(){
+  modal('<div class="mq">Importer des recommandations</div>' +
+    '<p style="margin:0">Colle le bloc copié avec « Copier pour le carnet ». Les recommandations sont ajoutées à côté de tes messages clés, sans toucher à ce que tu as écrit. Synchronise ensuite : elles partent chiffrées.</p>' +
+    '<label class="field-label" for="impTxt">Bloc à coller</label><textarea class="imp" id="impTxt" spellcheck="false"></textarea>' +
+    '<div class="modal-actions"><button type="button" class="btn" data-act="modal-close">Fermer</button><button type="button" class="btn primary" data-act="reco-import">Importer</button></div>');
+  var t = document.getElementById("impTxt"); if(t) t.focus();
+}
+function importReco(txt){
+  var data = JSON.parse(txt), list = data && data.reco;
+  if(!Array.isArray(list)) throw new Error("format");
+  var qs = coll("questions"), done = 0, miss = [];
+  list.forEach(function(r){
+    if(!r || typeof r.reco !== "string") return;
+    var it = null;
+    for(var i=0;i<qs.length;i++){ if(qs[i].id === r.id && (!r.q || qs[i].q === r.q)){ it = qs[i]; break; } }
+    if(!it && r.q){ for(var j=0;j<qs.length;j++){ if(String(qs[j].q).trim() === String(r.q).trim()){ it = qs[j]; break; } } }
+    if(!it && r.id){ it = findItem("questions", r.id); }
+    if(it){ it.reco = r.reco; done++; } else miss.push(r.q || r.id);
+  });
+  return {done:done, miss:miss};
+}
 function rowHtml(it, n, showGroup){
   var open = !!ui.open[it.id], edit = !!ui.edit[it.id];
   var notesLabel = n === "questions" ? "Messages clés" : (n === "asks" ? "Sa réponse" : "Ce que j'ai appris");
@@ -380,7 +436,8 @@ function rowHtml(it, n, showGroup){
   h += '<span class="dot st-' + esc(it.status) + '" title="' + esc(statusLabel(n, it.status)) + '"></span><span class="row-q">' + esc(it.q) + '</span><span class="row-meta">';
   if(showGroup) h += '<span class="grp-label">' + esc(groupName(it.g)) + '</span>';
   if(n === "questions") h += tagsHtml(it);
-  if(it.notes && it.notes.trim()) h += '<span class="has-notes">' + (n === "questions" ? "messages" : "notes") + '</span>';
+  if(it.notes && it.notes.trim()) h += '<span class="has-notes">' + (n === "questions" ? "mes messages" : "notes") + '</span>';
+  else if(n === "questions" && it.reco && it.reco.trim()) h += '<span class="has-reco">recommandé</span>';
   if(n === "questions") h += probHtml(it.prob);
   h += '</span></button>';
   if(open){
@@ -390,14 +447,17 @@ function rowHtml(it, n, showGroup){
       if(n === "questions"){
         h += '<div class="two"><label for="e-t-' + it.id + '">' + testedLabel + '<textarea id="e-t-' + it.id + '" rows="2" data-coll="' + n + '" data-id="' + it.id + '" data-field="tested">' + esc(it.tested) + '</textarea></label>';
         h += '<label for="e-p-' + it.id + '">Probabilité (%)<input id="e-p-' + it.id + '" type="number" min="0" max="100" step="5" data-coll="' + n + '" data-id="' + it.id + '" data-field="prob" value="' + esc(it.prob) + '"></label></div>';
+        h += '<label for="e-r-' + it.id + '">Messages recommandés (un par ligne)<textarea id="e-r-' + it.id + '" rows="4" data-coll="' + n + '" data-id="' + it.id + '" data-field="reco">' + esc(it.reco) + '</textarea></label>';
         h += '<label for="e-a-' + it.id + '">Piste de Claude<textarea id="e-a-' + it.id + '" rows="2" data-coll="' + n + '" data-id="' + it.id + '" data-field="angle">' + esc(it.angle) + '</textarea></label>';
       } else {
         h += '<label for="e-t-' + it.id + '">' + testedLabel + '<textarea id="e-t-' + it.id + '" rows="2" data-coll="' + n + '" data-id="' + it.id + '" data-field="tested">' + esc(it.tested) + '</textarea></label>';
       }
       h += '</div>';
     }
-    h += '<label class="field-label" for="n-' + it.id + '">' + notesLabel + '</label>';
-    h += '<textarea class="notes' + (n === "questions" ? " key" : "") + '" id="n-' + it.id + '" data-coll="' + n + '" data-id="' + it.id + '" data-field="notes" placeholder="' + (n === "questions" ? "Tes messages clés, un par ligne" : "Une idée par ligne") + '">' + esc(it.notes) + '</textarea>';
+    var mine = '<label class="field-label" for="n-' + it.id + '">' + (n === "questions" ? "Mes messages clés" : notesLabel) + '</label>';
+    mine += '<textarea class="notes' + (n === "questions" ? " key" : "") + '" id="n-' + it.id + '" data-coll="' + n + '" data-id="' + it.id + '" data-field="notes" placeholder="' + (n === "questions" ? "Tes messages clés, un par ligne. Pige à droite, puis réécris dans tes mots." : "Une idée par ligne") + '">' + esc(it.notes) + '</textarea>';
+    if(n === "questions") h += '<div class="pair"><div class="mine">' + mine + '</div>' + recoHtml(it) + '</div>';
+    else h += mine;
     if(!edit && (it.tested || it.angle)){
       h += '<details class="ctx"><summary>Contexte' + (n === "questions" ? " : ce qui est testé, piste de Claude" : "") + '</summary><dl class="facts">';
       if(it.tested) h += '<div><dt>' + testedLabel + '</dt><dd>' + esc(it.tested) + '</dd></div>';
@@ -534,7 +594,8 @@ function toMarkdown(){
     o.push("### " + g.name, "");
     items.forEach(function(it){
       o.push("#### " + it.q, "", "*" + statusLabel("questions", it.status) + (it.prob != null ? " · " + it.prob + " %" : "") + " · " + (it.src || []).map(srcLabel).join(", ") + "*", "");
-      var n = mdNotes(it.notes); if(n) o.push("**Messages clés**", "", n, "");
+      var n = mdNotes(it.notes); if(n) o.push("**Mes messages clés**", "", n, "");
+      var rn = mdNotes(it.reco); if(rn) o.push("**Recommandé par Claude**", "", rn, "");
       if(it.tested) o.push("- *Ce qui est testé :* " + it.tested);
       if(it.angle) o.push("- *Piste de Claude :* " + it.angle);
       o.push("");
@@ -577,6 +638,7 @@ function renderPractice(){
   h += '<div class="mq">' + esc(it.q) + '</div><div class="timer" id="pTimer">Temps de réponse : ' + elapsed(practice.start) + '</div>';
   if(practice.reveal){
     h += '<div class="reveal"><div class="field-label">Messages clés</div><pre>' + (it.notes && it.notes.trim() ? esc(it.notes) : "Pas encore de messages clés pour cette question.") + '</pre>';
+    if(it.reco && it.reco.trim()) h += '<div class="field-label">Recommandé par Claude</div><pre>' + esc(recoLines(it).map(function(l){ return "• " + l; }).join("\n")) + '</pre>';
     if(it.tested) h += '<div class="hint"><b>Ce qui est testé :</b> ' + esc(it.tested) + '</div>';
     if(it.angle) h += '<div class="hint"><b>Piste de Claude :</b> ' + esc(it.angle) + '</div>';
     h += '</div>';
@@ -622,6 +684,28 @@ root.addEventListener("click", function(ev){
   if(act === "expand"){ coll(ui.tab).forEach(function(x){ if(matches(x, ui.tab)) ui.open[x.id] = true; }); renderList(); return; }
   if(act === "collapse"){ ui.open = {}; renderList(); return; }
   if(act === "sync"){ sync(); return; }
+  if(act === "reco-import-open"){ openRecoImport(); return; }
+  if(act === "reco-import"){
+    var raw = ((document.getElementById("impTxt") || {}).value || "").trim();
+    if(!raw){ toast("Colle d'abord le bloc."); return; }
+    try { var res = importReco(raw); } catch(e){ toast("Ce bloc n'est pas dans le bon format."); return; }
+    closeModal(); if(res.done) markDirty(); render();
+    toast(res.done + " recommandations importées" + (res.miss.length ? ", " + res.miss.length + " sans question correspondante" : "") + ". Synchronise pour les garder.");
+    return;
+  }
+  if(act === "reco-add" || act === "reco-all"){
+    var ri = findItem("questions", id); if(!ri) return;
+    var rl = recoLines(ri), pick = act === "reco-all" ? rl : [rl[parseInt(el.getAttribute("data-i"), 10)]];
+    var added = addToNotes(ri, pick);
+    if(added){ markDirty(); renderList(); var ta2 = document.getElementById("n-" + id); if(ta2){ autosize(ta2); ta2.focus({preventScroll:true}); ta2.setSelectionRange(ta2.value.length, ta2.value.length); } toast(added > 1 ? added + " messages ajoutés. Réécris-les dans tes mots." : "Message ajouté. Réécris-le dans tes mots."); }
+    else toast("Déjà dans tes messages.");
+    return;
+  }
+  if(act === "reco-copy"){
+    var rc = findItem("questions", id); if(!rc) return;
+    try { navigator.clipboard.writeText(recoLines(rc).join("\n")).then(function(){ toast("Messages recommandés copiés."); }, function(){ toast("Copie refusée par le navigateur."); }); } catch(e){ toast("Copie refusée par le navigateur."); }
+    return;
+  }
   if(act === "lock"){ lock(); return; }
   if(act === "token"){ openTokenDialog(); return; }
   if(act === "token-forget"){ tokenSet(null); closeModal(); toast("Jeton retiré de cet appareil."); return; }
