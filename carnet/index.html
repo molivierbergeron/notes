@@ -126,6 +126,7 @@ textarea.notes:focus,.edit-grid textarea:focus,.edit-grid input:focus{border-col
 .add-btn:hover{color:var(--accent)}
 .empty{padding:18px 14px;color:var(--muted)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:14px}
+.cards.one{grid-template-columns:minmax(0,1fr)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;display:grid;gap:8px;align-content:start}
 .card h3{font-family:var(--font-display);font-size:16px;margin:0}
 .hint{font-size:13.5px;color:var(--muted);background:var(--paper);border-radius:6px;padding:8px 10px}
@@ -389,22 +390,26 @@ function probHtml(p){
   return '<span class="prob" title="Probabilité estimée"><i><b style="width:' + v + '%"></b></i>' + v + ' %</span>';
 }
 function recoLines(it){ return String(it.reco || "").split("\n").map(function(s){ return s.trim(); }).filter(Boolean); }
-function noteHas(it, line){ return String(it.notes || "").split("\n").some(function(s){ return s.trim() === line; }); }
-function recoHtml(it){
+function routeLine(line, f){ var m = f === "fr" && /^EN\s*:\s*/.exec(line); return m ? {f:"en", l:line.slice(m[0].length).replace(/^"|"$/g, "")} : {f:f || "notes", l:line}; }
+function noteHas(it, line, f){ var r = routeLine(line, f); f = r.f; line = r.l; return String(it[f || "notes"] || "").split("\n").some(function(s){ return s.trim() === line; }); }
+function recoHtml(it, c, f){
+  c = c || "questions"; f = f || "notes";
+  var tgt = f === "fr" ? "ma version FR" : "mes messages";
+  var attrs = ' data-id="' + it.id + '" data-coll="' + c + '" data-tf="' + f + '"';
   var lines = recoLines(it);
   var h = '<aside class="reco" aria-label="Messages recommandés"><span class="field-label">Recommandé par Claude</span>';
-  if(!lines.length) return h + '<div class="grp-label">Pas encore de recommandation pour cette question.</div></aside>';
+  if(!lines.length) return c === "questions" ? h + '<div class="grp-label">Pas encore de recommandation pour cette question.</div></aside>' : "";
   h += '<ul>' + lines.map(function(l, i){
-    var has = noteHas(it, l);
-    return '<li><span class="txt">' + esc(l) + '</span><button type="button" class="add1" data-act="reco-add" data-id="' + it.id + '" data-i="' + i + '"' + (has ? ' disabled title="Déjà dans tes messages"' : ' title="Ajouter à mes messages"') + ' aria-label="Ajouter ce message">' + (has ? '✓' : '+') + '</button></li>';
+    var has = noteHas(it, l, f);
+    return '<li><span class="txt">' + esc(l) + '</span><button type="button" class="add1" data-act="reco-add"' + attrs + ' data-i="' + i + '"' + (has ? ' disabled title="Déjà dans ' + tgt + '"' : ' title="Ajouter à ' + tgt + '"') + ' aria-label="Ajouter ce message">' + (has ? '✓' : '+') + '</button></li>';
   }).join("") + '</ul>';
-  return h + '<div class="reco-actions"><button type="button" class="btn" data-act="reco-all" data-id="' + it.id + '">Tout ajouter à mes messages</button><button type="button" class="btn ghost" data-act="reco-copy" data-id="' + it.id + '">Copier</button></div></aside>';
+  return h + '<div class="reco-actions"><button type="button" class="btn" data-act="reco-all"' + attrs + '>Tout ajouter à ' + tgt + '</button><button type="button" class="btn ghost" data-act="reco-copy"' + attrs + '>Copier</button></div></aside>';
 }
-function addToNotes(it, lines){
-  var cur = String(it.notes || "").replace(/\s+$/, "");
-  var add = lines.filter(function(l){ return l && !noteHas(it, l); });
+function addToNotes(it, lines, f){
+  f = f || "notes";
+  var add = lines.filter(function(l){ return l && !noteHas(it, l, f); });
   if(!add.length) return 0;
-  it.notes = (cur ? cur + "\n" : "") + add.join("\n");
+  add.forEach(function(l){ var r = routeLine(l, f), cur = String(it[r.f] || "").replace(/\s+$/, ""); it[r.f] = (cur ? cur + "\n" : "") + r.l; });
   return add.length;
 }
 function openRecoImport(){
@@ -488,7 +493,7 @@ function pitchHtml(){
       var id = "pt-" + it.id + "-" + l[0];
       x += '<div class="pitch-col"><label class="field-label" for="' + id + '">' + l[1] + '</label><textarea class="notes key" id="' + id + '" data-coll="pitch" data-id="' + it.id + '" data-field="' + l[0] + '" placeholder="' + (l[0] === "fr" ? "Ta version, dans tes mots" : "Your version, in your words") + '">' + esc(it[l[0]]) + '</textarea><span id="m-' + id + '">' + meterHtml(it[l[0]], it.target) + '</span></div>';
     });
-    return x + '</div></section>';
+    return x + '</div>' + recoHtml(it, "pitch", "fr") + '</section>';
   }).join("");
   if(!items.length) h += '<p class="empty">Rien ne correspond à la recherche.</p>';
   return h;
@@ -498,9 +503,9 @@ function listHtml(){
   if(n === "pitch") return pitchHtml();
   if(n === "fondations"){
     var fs = coll("fondations").filter(function(it){ return matches(it, n); });
-    h += '<div class="cards">' + fs.map(function(it){
+    h += '<div class="cards one">' + fs.map(function(it){
       return '<section class="card"><h3>' + esc(it.title) + '</h3>' + (it.hint ? '<div class="hint">' + esc(it.hint) + '</div>' : '') +
-        '<label class="sr" for="n-' + it.id + '">Notes</label><textarea class="notes" id="n-' + it.id + '" data-coll="fondations" data-id="' + it.id + '" data-field="notes" placeholder="Tes mots à toi">' + esc(it.notes) + '</textarea></section>';
+        '<label class="sr" for="n-' + it.id + '">Notes</label><textarea class="notes" id="n-' + it.id + '" data-coll="fondations" data-id="' + it.id + '" data-field="notes" placeholder="Tes mots à toi">' + esc(it.notes) + '</textarea>' + recoHtml(it, "fondations", "notes") + '</section>';
     }).join("") + '</div>';
     return h + (fs.length ? "" : '<p class="empty">Rien ne correspond à la recherche.</p>');
   }
@@ -587,6 +592,7 @@ function toMarkdown(){
     o.push("### " + it.title + " (cible " + it.target + " s)", "");
     if(it.fr) o.push("**FR**", "", it.fr, "");
     if(it.en) o.push("**EN**", "", it.en, "");
+    var pr = mdNotes(it.reco); if(pr) o.push("**Recommandé par Claude**", "", pr, "");
   });
   o.push("## " + tabLabel("questions"), "");
   state.groups.forEach(function(g){
@@ -610,7 +616,7 @@ function toMarkdown(){
     o.push("");
   });
   o.push("## " + tabLabel("fondations"), "");
-  coll("fondations").forEach(function(it){ o.push("### " + it.title, ""); if(it.hint) o.push("> " + it.hint, ""); var n = mdNotes(it.notes); if(n) o.push(n, ""); });
+  coll("fondations").forEach(function(it){ o.push("### " + it.title, ""); if(it.hint) o.push("> " + it.hint, ""); var n = mdNotes(it.notes); if(n) o.push(n, ""); var fr2 = mdNotes(it.reco); if(fr2) o.push("**Recommandé par Claude**", "", fr2, ""); });
   return o.join("\n") + "\n";
 }
 
@@ -694,15 +700,16 @@ root.addEventListener("click", function(ev){
     return;
   }
   if(act === "reco-add" || act === "reco-all"){
-    var ri = findItem("questions", id); if(!ri) return;
+    var rcoll = n || "questions", rf = el.getAttribute("data-tf") || "notes";
+    var ri = findItem(rcoll, id); if(!ri) return;
     var rl = recoLines(ri), pick = act === "reco-all" ? rl : [rl[parseInt(el.getAttribute("data-i"), 10)]];
-    var added = addToNotes(ri, pick);
-    if(added){ markDirty(); renderList(); var ta2 = document.getElementById("n-" + id); if(ta2){ autosize(ta2); ta2.focus({preventScroll:true}); ta2.setSelectionRange(ta2.value.length, ta2.value.length); } toast(added > 1 ? added + " messages ajoutés. Réécris-les dans tes mots." : "Message ajouté. Réécris-le dans tes mots."); }
+    var added = addToNotes(ri, pick, rf);
+    if(added){ markDirty(); renderList(); var ta2 = document.getElementById(rcoll === "pitch" ? "pt-" + id + "-" + rf : "n-" + id); if(ta2){ autosize(ta2); ta2.focus({preventScroll:true}); ta2.setSelectionRange(ta2.value.length, ta2.value.length); } toast(added > 1 ? added + " messages ajoutés. Réécris-les dans tes mots." : "Message ajouté. Réécris-le dans tes mots."); }
     else toast("Déjà dans tes messages.");
     return;
   }
   if(act === "reco-copy"){
-    var rc = findItem("questions", id); if(!rc) return;
+    var rc = findItem(n || "questions", id); if(!rc) return;
     try { navigator.clipboard.writeText(recoLines(rc).join("\n")).then(function(){ toast("Messages recommandés copiés."); }, function(){ toast("Copie refusée par le navigateur."); }); } catch(e){ toast("Copie refusée par le navigateur."); }
     return;
   }
